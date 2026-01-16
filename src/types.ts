@@ -256,7 +256,7 @@ export function createOptionalCallbackFunction<T, A extends unknown[]>(
     if (isErrorFirstCallback(possibleCallback)) {
       try {
         const result = syncVersion(...(args.slice(0, -1) as A));
-        possibleCallback(null, result);
+        process.nextTick(() => possibleCallback(null, result));
       } catch (err) {
         possibleCallback(err instanceof Error ? err : new Error("Unknown error"));
       }
