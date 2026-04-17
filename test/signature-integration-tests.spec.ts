@@ -1,6 +1,7 @@
 import * as xpath from "xpath";
+import * as crypto from "crypto";
 import * as xmldom from "@xmldom/xmldom";
-import { SignedXml } from "../src/index";
+import { SignedXml, type SignatureAlgorithm } from "../src/index";
 import * as fs from "fs";
 import { expect } from "chai";
 import * as isDomNode from "@xmldom/is-dom-node";
@@ -222,5 +223,255 @@ describe("Signature integration tests", function () {
       doc.documentElement.childNodes.length,
       "<library> should have two child nodes : <book> and <Signature>",
     ).to.equal(2);
+  });
+
+  const AsyncSignatureAlgorithm = class implements SignatureAlgorithm {
+    getAlgorithmName = () => "http://www.w3.org/2000/09/xmldsig#rsa-sha1" as const;
+    getSignature = (): never => {
+      throw new Error("Not supported");
+    };
+    verifySignature = (): never => {
+      throw new Error("Not supported");
+    };
+    // Use 1-shot async crypto verify via the optional verifySignatureAsync hook
+    verifySignatureAsync = (
+      data: string,
+      key: crypto.KeyLike,
+      sig: string,
+      cb: (err: Error | null, result?: boolean) => void,
+    ): void => {
+      try {
+        crypto.verify("RSA-SHA1", Buffer.from(data), key, Buffer.from(sig, "base64"), cb);
+      } catch (e) {
+        cb(e as Error);
+      }
+    };
+  };
+
+  it("validates signature async with sync crypto", function (done) {
+    const xml = fs.readFileSync("./test/static/valid_signature.xml", "utf-8");
+    const doc = new xmldom.DOMParser().parseFromString(xml);
+    const childXml = doc.firstChild?.toString();
+
+    const signature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      doc,
+    );
+    isDomNode.assertIsNodeLike(signature);
+    const sig = new SignedXml();
+    sig.publicCert = fs.readFileSync("./test/static/client_public.pem");
+    sig.loadSignature(signature);
+    sig.checkSignature(childXml ?? "", (err, result) => {
+      try {
+        expect(err).to.be.null;
+        expect(result).to.be.true;
+        expect(sig.getSignedReferences().length).to.equal(3);
+        done();
+      } catch (e) {
+        done(e);
+      }
+    });
+  });
+
+  it("validates signature async with async crypto", function (done) {
+    const xml = fs.readFileSync("./test/static/valid_signature.xml", "utf-8");
+    const doc = new xmldom.DOMParser().parseFromString(xml);
+    const childXml = doc.firstChild?.toString();
+
+    const signature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      doc,
+    );
+    isDomNode.assertIsNodeLike(signature);
+    const sig = new SignedXml();
+
+    sig.SignatureAlgorithms = {
+      "http://www.w3.org/2000/09/xmldsig#rsa-sha1": AsyncSignatureAlgorithm,
+    };
+
+    sig.publicCert = fs.readFileSync("./test/static/client_public.pem");
+    sig.loadSignature(signature);
+    sig.checkSignature(childXml ?? "", (err, result) => {
+      try {
+        expect(err).to.be.null;
+        expect(result).to.be.true;
+        expect(sig.getSignedReferences().length).to.equal(3);
+        done();
+      } catch (e) {
+        done(e);
+      }
+    });
+  });
+
+  it("fails async validation for invalid signature with sync crypto", function (done) {
+    const xml = fs.readFileSync("./test/static/invalid_signature - signature value.xml", "utf-8");
+    const doc = new xmldom.DOMParser().parseFromString(xml);
+    const childXml = doc.firstChild?.toString();
+
+    const signature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      doc,
+    );
+    isDomNode.assertIsNodeLike(signature);
+    const sig = new SignedXml();
+    sig.publicCert = fs.readFileSync("./test/static/client_public.pem");
+    sig.loadSignature(signature);
+    sig.checkSignature(childXml ?? "", (err, result) => {
+      try {
+        expect(result).to.be.undefined;
+        expect(err).to.be.match(/invalid signature/);
+        expect(sig.getSignedReferences().length).to.equal(0);
+        done();
+      } catch (e) {
+        done(e);
+      }
+    });
+  });
+
+  it("fails async validation for invalid signature with async crypto", function (done) {
+    const xml = fs.readFileSync("./test/static/invalid_signature - signature value.xml", "utf-8");
+    const doc = new xmldom.DOMParser().parseFromString(xml);
+    const childXml = doc.firstChild?.toString();
+
+    const signature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      doc,
+    );
+    isDomNode.assertIsNodeLike(signature);
+    const sig = new SignedXml();
+    sig.SignatureAlgorithms = {
+      "http://www.w3.org/2000/09/xmldsig#rsa-sha1": AsyncSignatureAlgorithm,
+    };
+    sig.publicCert = fs.readFileSync("./test/static/client_public.pem");
+    sig.loadSignature(signature);
+    sig.checkSignature(childXml ?? "", (err, result) => {
+      try {
+        expect(result).to.be.undefined;
+        expect(err).to.be.match(/invalid signature/);
+        expect(sig.getSignedReferences().length).to.equal(0);
+        done();
+      } catch (e) {
+        done(e);
+      }
+    });
+  });
+
+  it("fails async validation for invalid cert with async crypto", function (done) {
+    const xml = fs.readFileSync("./test/static/invalid_signature - signature value.xml", "utf-8");
+    const doc = new xmldom.DOMParser().parseFromString(xml);
+    const childXml = doc.firstChild?.toString();
+
+    const signature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      doc,
+    );
+    isDomNode.assertIsNodeLike(signature);
+    const sig = new SignedXml();
+    sig.SignatureAlgorithms = {
+      "http://www.w3.org/2000/09/xmldsig#rsa-sha1": AsyncSignatureAlgorithm,
+    };
+    sig.publicCert = "invalid pem";
+    sig.loadSignature(signature);
+    sig.checkSignature(childXml ?? "", (err, result) => {
+      try {
+        expect(result).to.be.undefined;
+        expect(err).to.be.match(/error:1E08010C:DECODER routines::unsupported/);
+        expect(sig.getSignedReferences().length).to.equal(0);
+        done();
+      } catch (e) {
+        done(e);
+      }
+    });
+  });
+
+  it("clears signed references after error in sync validation", function () {
+    const validXml = fs.readFileSync("./test/static/valid_signature.xml", "utf-8");
+    const invalidXml = fs.readFileSync(
+      "./test/static/invalid_signature - signature value.xml",
+      "utf-8",
+    );
+
+    const validDoc = new xmldom.DOMParser().parseFromString(validXml);
+    const validChildXml = validDoc.firstChild?.toString();
+    const validSignature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      validDoc,
+    );
+    isDomNode.assertIsNodeLike(validSignature);
+
+    const sig = new SignedXml();
+    sig.publicCert = fs.readFileSync("./test/static/client_public.pem");
+    sig.loadSignature(validSignature);
+
+    // First validation - should succeed
+    const result = sig.checkSignature(validChildXml ?? "");
+    expect(result).to.be.true;
+    expect(sig.getSignedReferences().length).to.be.greaterThan(0);
+
+    // Second validation with invalid signature and same SignedXml instance
+    const invalidDoc = new xmldom.DOMParser().parseFromString(invalidXml);
+    const invalidChildXml = invalidDoc.firstChild?.toString();
+    const invalidSignature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      invalidDoc,
+    );
+    isDomNode.assertIsNodeLike(invalidSignature);
+
+    sig.loadSignature(invalidSignature);
+
+    expect(() => sig.checkSignature(invalidChildXml ?? "")).to.throw(/invalid signature/);
+    expect(sig.getSignedReferences().length).to.equal(0);
+  });
+
+  it("clears signed references after error in async validation", function (done) {
+    const validXml = fs.readFileSync("./test/static/valid_signature.xml", "utf-8");
+    const invalidXml = fs.readFileSync(
+      "./test/static/invalid_signature - signature value.xml",
+      "utf-8",
+    );
+
+    const validDoc = new xmldom.DOMParser().parseFromString(validXml);
+    const validChildXml = validDoc.firstChild?.toString();
+    const validSignature = xpath.select1(
+      "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+      validDoc,
+    );
+    isDomNode.assertIsNodeLike(validSignature);
+
+    const sig = new SignedXml();
+    sig.publicCert = fs.readFileSync("./test/static/client_public.pem");
+    sig.loadSignature(validSignature);
+
+    // First validation - should succeed
+    sig.checkSignature(validChildXml ?? "", (err, result) => {
+      try {
+        expect(err).to.be.null;
+        expect(result).to.be.true;
+        expect(sig.getSignedReferences().length).to.be.greaterThan(0);
+
+        // Second validation with invalid signature and same SignedXml instance
+        const invalidDoc = new xmldom.DOMParser().parseFromString(invalidXml);
+        const invalidChildXml = invalidDoc.firstChild?.toString();
+        const invalidSignature = xpath.select1(
+          "//*//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+          invalidDoc,
+        );
+        isDomNode.assertIsNodeLike(invalidSignature);
+
+        sig.loadSignature(invalidSignature);
+        sig.checkSignature(invalidChildXml ?? "", (err2, result2) => {
+          try {
+            expect(result2).to.be.undefined;
+            expect(err2).to.match(/invalid signature/);
+            expect(sig.getSignedReferences().length).to.equal(0);
+            done();
+          } catch (e) {
+            done(e);
+          }
+        });
+      } catch (e) {
+        done(e);
+      }
+    });
   });
 });

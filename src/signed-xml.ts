@@ -355,6 +355,31 @@ export class SignedXml {
     }
 
     // Check the signature verification to know whether to reset signature value or not.
+    if (typeof signer.verifySignatureAsync === "function" && callback) {
+      signer.verifySignatureAsync(
+        unverifiedSignedInfoCanon,
+        key,
+        this.signatureValue,
+        (error, sigRes) => {
+          if (sigRes === true && !error) {
+            callback(null, true);
+            return;
+          }
+          this.signedReferences = [];
+          this.references.forEach((ref) => {
+            ref.signedReference = undefined;
+          });
+          callback(
+            error ??
+              new Error(
+                `invalid signature: the signature value ${this.signatureValue} is incorrect`,
+              ),
+          );
+        },
+      );
+      return;
+    }
+
     const sigRes = signer.verifySignature(unverifiedSignedInfoCanon, key, this.signatureValue);
     if (sigRes === true) {
       if (callback) {

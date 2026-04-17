@@ -201,6 +201,19 @@ export interface SignatureAlgorithm {
     callback?: ErrorFirstCallback<boolean>,
   ): void;
 
+  /**
+   * Optional async verification. When present, this is used instead of `verifySignature`
+   * when `checkSignature` is called with a callback. The callback MUST be called exactly once.
+   *
+   * Implement this to use truly asynchronous crypto (e.g. Node's one-shot `crypto.verify`).
+   */
+  verifySignatureAsync?(
+    material: string,
+    key: crypto.KeyLike,
+    signatureValue: string,
+    callback: ErrorFirstCallback<boolean>,
+  ): void;
+
   getAlgorithmName(): SignatureAlgorithmType;
 }
 
